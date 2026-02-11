@@ -21,14 +21,12 @@ def load_api_key():
         exit(1)
 
 def load_group_id():
-    """Read Group ID from group_id.key file"""
+    """Read Group ID from group_id.key file (optional)"""
     try:
         with open("group_id.key", "r") as f:
             return f.read().strip()
     except FileNotFoundError:
-        print("Error: group_id.key file not found!")
-        print("Create 'group_id.key' file with your MiniMax Group ID")
-        exit(1)
+        return None  # Group ID is optional
 
 API_KEY = load_api_key()
 GROUP_ID = load_group_id()
@@ -66,7 +64,9 @@ def solve_captcha(image_path, mock_result=None):
         "Content-Type": "application/json"
     }
 
-    url = f"{API_URL}?GroupId={GROUP_ID}"
+    url = f"{API_URL}"
+    if GROUP_ID:
+        url += f"?GroupId={GROUP_ID}"
 
     payload = {
         "model": "MiniMax-M2",
