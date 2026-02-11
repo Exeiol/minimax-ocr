@@ -32,9 +32,17 @@ class MiniMaxOCR:
             "MM-API-Source": "OpenClaw",
         }
 
-    def get_4_char_code(self, image_data_url: str, prompt: str = DEFAULT_PROMPT, timeout: int = 45) -> str:
+    def get_4_char_code(
+        self,
+        image_data_url: str,
+        prompt: str = DEFAULT_PROMPT,
+        timeout: int = 60,
+        additional_prompt: str = "",
+    ) -> str:
         payload = {
-            "prompt": prompt,
+            "prompt": (
+                prompt + "\n" + additional_prompt if additional_prompt else prompt
+            ),
             "image_url": image_data_url,
         }
 
