@@ -12,7 +12,8 @@ import sys
 
 # Configuration
 MINIMAX_API_KEY = os.environ.get("MINIMAX_API_KEY", "YOUR_API_KEY_HERE")
-API_URL = "https://api.minimax.chat/v1/text/chatcompletion_v2"
+MINIMAX_GROUP_ID = os.environ.get("MINIMAX_GROUP_ID", "YOUR_GROUP_ID_HERE")
+API_URL = "https://api.minimax.io/v1/text/chatcompletion_v2"
 MOCK_MODE = os.environ.get("MINIMAX_MOCK_MODE", "false").lower() == "true"
 
 def encode_image(image_path):
@@ -56,8 +57,11 @@ def solve_captcha(image_path, mock_result=None):
         "Content-Type": "application/json"
     }
 
+    # Build URL with GroupId
+    url = f"{API_URL}?GroupId={MINIMAX_GROUP_ID}"
+
     payload = {
-        "model": "MiniMax-M2.1",  # Use the latest multimodal model
+        "model": "MiniMax-M2",  # Use MiniMax-M2 for vision capabilities
         "messages": [
             {
                 "role": "user",
@@ -81,7 +85,7 @@ def solve_captcha(image_path, mock_result=None):
 
     # Make API call
     try:
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
         return {"error": f"API request failed: {str(e)}"}
@@ -134,12 +138,18 @@ if __name__ == "__main__":
     else:
         image_paths = sys.argv[1:]
 
-    # Check API key (skip if mock mode)
-    if not MOCK_MODE and MINIMAX_API_KEY == "YOUR_API_KEY_HERE":
-        print("⚠️  Set MINIMAX_API_KEY environment variable first!")
-        print("   export MINIMAX_API_KEY='your_api_key'")
-        print("   Or test with mock mode: export MINIMAX_MOCK_MODE='true'")
-        sys.exit(1)
+    # Check API key and Group ID (skip if mock mode)
+    if not MOCK_MODE:
+        if MINIMAX_API_KEY == "YOUR_API_KEY_HERE":
+            print("⚠️  Set MINIMAX_API_KEY environment variable first!")
+            print("   export MINIMAX_API_KEY='your_api_key'")
+            print("   export MINIMAX_GROUP_ID='your_group_id'")
+            print("   Or test with mock mode: export MINIMAX_MOCK_MODE='true'")
+            sys.exit(1)
+        if MINIMAX_GROUP_ID == "YOUR_GROUP_ID_HERE":
+            print("⚠️  Set MINIMAX_GROUP_ID environment variable first!")
+            print("   export MINIMAX_GROUP_ID='your_group_id'")
+            sys.exit(1)
 
     # Solve
     results = batch_solve(image_paths)

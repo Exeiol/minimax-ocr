@@ -9,13 +9,14 @@ cd ~/minimax-ocr/
 pip install -r requirements.txt
 ```
 
-## Configure API Key
+## Configure API Key and Group ID
 
 ```bash
 export MINIMAX_API_KEY='your_api_key'
+export MINIMAX_GROUP_ID='your_group_id'
 ```
 
-Get your key from: https://platform.minimax.io/
+Get your key and group ID from: https://platform.minimax.io/
 
 ## Usage
 
