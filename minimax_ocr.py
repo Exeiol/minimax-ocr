@@ -1,48 +1,27 @@
 #!/usr/bin/env python3
 """
-MiniMax Vision OCR - Simple Captcha Solver
-Uses MiniMax-VL-01 vision-language model via Coding Plan API
-Reads images from 'input' directory, outputs: filename \t text
+MiniMax Vision OCR - Captcha Solver using MiniMax Coding Plan MCP
+Uses the understand_image tool from MiniMax-Coding-Plan-MCP
+
+Setup:
+    pip install minimax-coding-plan-mcp
+    uvx minimax-coding-plan-mcp
+    
+Or use direct API with a different vision provider (OpenAI GPT-4o, Google Gemini)
 """
 
 import os
-import base64
-import requests
+import subprocess
+import json
 import re
 
 # Configuration
-API_KEY = None
 MOCK_MODE = os.environ.get("MINIMAX_MOCK_MODE", "false").lower() == "true"
-
-def load_api_key():
-    """Read API key from api.key file"""
-    global API_KEY
-    try:
-        with open("api.key", "r") as f:
-            API_KEY = f.read().strip()
-    except FileNotFoundError:
-        print("Error: api.key file not found!")
-        print("Create 'api.key' file with your MiniMax API key")
-        exit(1)
-
-def image_to_data_url(image_path):
-    """Convert image to base64 data URL"""
-    with open(image_path, "rb") as f:
-        image_data = f.read()
-        base64_data = base64.b64encode(image_data).decode('utf-8')
-        # Detect format from file extension
-        if image_path.lower().endswith('.png'):
-            format = 'png'
-        elif image_path.lower().endswith('.webp'):
-            format = 'webp'
-        else:
-            format = 'jpeg'
-        return f"data:image/{format};base64,{base64_data}"
 
 def solve_captcha(image_path, mock_result=None):
     """
-    Send captcha image to MiniMax Vision API and extract 4 characters (A-Z, 0-9).
-    Uses Anthropic API format for Coding Plan subscribers.
+    Send captcha image to MiniMax via understand_image tool.
+    Requires MiniMax Coding Plan MCP server to be running.
     """
     # Mock mode for testing
     if MOCK_MODE:
@@ -54,101 +33,121 @@ def solve_captcha(image_path, mock_result=None):
             clean_text = ''.join(random.choice(chars) for _ in range(4))
         return clean_text
 
-    # Read API key
-    if API_KEY is None:
-        load_api_key()
+    # Check if file exists
+    if not os.path.exists(image_path):
+        return f"ERROR: File not found: {image_path}"
 
-    # Encode image
+    # Method 1: Use MiniMax Coding Plan MCP (if available)
     try:
-        image_url = image_to_data_url(image_path)
-    except Exception as e:
-        return f"ERROR: {e}"
-
-    # Method 1: Try Anthropic API format (for Coding Plan subscribers)
-    anthropic_url = "https://api.minimax.io/anthropic/v1/messages"
+        result = subprocess.run(
+            ["npx", "-y", "minimax-coding-plan-mcp", "understand_image"],
+            input=json.dumps({
+                "prompt": "Extract ONLY the 4 characters you see. Reply with exactly 4 uppercase letters or numbers (A-Z, 0-9). Example: W5FE",
+                "image_url": f"file://{os.path.abspath(image_path)}"
+            }),
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            if "text" in data:
+                text = data["text"]
+                clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())[:4]
+                if clean_text:
+                    return clean_text
+    except Exception as mcp_error:
+        pass  # Fall through to next method
     
-    anthropic_headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json",
-        "anthropic-version": "2023-06-01"
-    }
-    
-    anthropic_payload = {
-        "model": "MiniMax-VL-01",
-        "max_tokens": 10,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "Extract ONLY the 4 characters you see in this image. Reply with exactly 4 uppercase letters or numbers (A-Z, 0-9). No other text. Example: W5FE"
-                    },
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "image/jpeg",
-                            "data": image_url.split(",")[1]
-                        }
-                    }
-                ]
-            }
-        ]
-    }
-
-    # Try Anthropic format first (Coding Plan)
-    try:
-        response = requests.post(anthropic_url, headers=anthropic_headers, json=anthropic_payload, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        
-        # Parse Anthropic response
-        if "content" in data and len(data["content"]) > 0:
-            for block in data["content"]:
-                if block.get("type") == "text":
-                    text = block.get("text", "").strip()
-                    clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())[:4]
-                    if clean_text:
-                        return clean_text
-        
-        return "PARSE_ERROR: no text in response"
-    except Exception as e:
-        error_str = str(e)
-        
-        # If Anthropic format fails, try VLM format
-        vlm_url = "https://api.minimax.io/v1/coding_plan/vlm"
-        
-        vlm_headers = {
-            "Authorization": f"Bearer {API_KEY}",
-            "Content-Type": "application/json"
-        }
-        
-        vlm_payload = {
-            "model": "MiniMax-VL-01",
-            "prompt": "Extract ONLY the 4 characters you see in this image. Reply with exactly 4 uppercase letters or numbers (A-Z, 0-9). No other text. Example: W5FE",
-            "image_url": image_url
-        }
-        
+    # Method 2: Use OpenAI GPT-4o (alternative)
+    openai_key = os.environ.get("OPENAI_API_KEY", "")
+    if openai_key:
         try:
-            response = requests.post(vlm_url, headers=vlm_headers, json=vlm_payload, timeout=30)
-            response.raise_for_status()
-            data = response.json()
+            import base64
+            from openai import OpenAI
             
-            # Check for MiniMax errors
-            base_resp = data.get("base_resp") or {}
-            status_code = base_resp.get("status_code")
-            if status_code is not None and status_code != 0:
-                return f"API_ERROR: {base_resp.get('status_msg', status_code)}"
+            client = OpenAI(api_key=openai_key)
             
-            # Extract text
-            text = data.get("text", "").strip()
+            with open(image_path, "rb") as f:
+                image_data = base64.b64encode(f.read()).decode('utf-8')
+            
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Extract ONLY the 4 characters you see in this image. Reply with exactly 4 uppercase letters or numbers (A-Z, 0-9). Example: W5FE"
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{image_data}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=10,
+                temperature=0.1
+            )
+            
+            text = response.choices[0].message.content.strip()
             clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())[:4]
             if clean_text:
                 return clean_text
-            return "PARSE_ERROR: no valid characters"
-        except Exception as e2:
-            return f"API_ERROR: {str(e)}"
+        except Exception as openai_error:
+            pass  # Fall through to next method
+    
+    # Method 3: Use Google Gemini (alternative)
+    gemini_key = os.environ.get("GOOGLE_API_KEY", "")
+    if gemini_key:
+        try:
+            import httpx
+            from PIL import Image
+            
+            img = Image.open(image_path)
+            
+            response = httpx.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}",
+                json={
+                    "contents": [{
+                        "parts": [
+                            {"text": "Extract ONLY the 4 characters you see. Reply with exactly 4 uppercase letters or numbers (A-Z, 0-9). Example: W5FE"},
+                            {"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(img.tobytes()).decode('utf-8')}}
+                        ]
+                    }],
+                    "generationConfig": {"maxOutputTokens": 10, "temperature": 0.1}
+                },
+                timeout=30
+            )
+            
+            data = response.json()
+            if "candidates" in data:
+                text = data["candidates"][0]["content"]["parts"][0]["text"]
+                clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())[:4]
+                if clean_text:
+                    return clean_text
+        except Exception as gemini_error:
+            pass
+    
+    # Method 4: Local OCR fallback (EasyOCR)
+    try:
+        import easyocr
+        reader = easyocr.Reader(['en'])
+        result = reader.readtext(image_path, detail=0)
+        if result:
+            text = ' '.join(result)
+            clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())[:4]
+            if clean_text:
+                return clean_text
+    except Exception:
+        pass
+    
+    return "ERROR: No vision provider available. Set MINIMAX_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY, or install EasyOCR."
 
 def main():
     """Read images from input directory, print results"""
@@ -161,10 +160,10 @@ def main():
         exit(1)
     
     # Get sorted list of image files
-    files = sorted([f for f in os.listdir(input_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))])
+    files = sorted([f for f in os.listdir(input_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif'))])
     
     if not files:
-        print(f"No .jpg/.jpeg/.png/.webp files found in '{input_dir}'")
+        print(f"No image files found in '{input_dir}'")
         exit(0)
     
     # Process each file
