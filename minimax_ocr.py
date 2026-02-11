@@ -1,172 +1,105 @@
 #!/usr/bin/env python3
 """
-MiniMax Vision OCR - Captcha Solver using MiniMax Coding Plan MCP
-Uses the understand_image tool from MiniMax-Coding-Plan-MCP
-
-Setup:
-    pip install minimax-coding-plan-mcp
-    uvx minimax-coding-plan-mcp
-    
-Or use direct API with a different vision provider (OpenAI GPT-4o, Google Gemini)
+MiniMax Vision OCR - Captcha Solver
+Replicates OpenClaw's internal image analysis method
+Reads from input/*.jpg, outputs: filename \t text
 """
 
 import os
-import subprocess
-import json
+import base64
+import requests
 import re
 
 # Configuration
+def load_api_key():
+    """Read API key from api.key file"""
+    try:
+        with open("api.key", "r") as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        print("Error: api.key file not found!")
+        print("Create 'api.key' file with your MiniMax API key")
+        exit(1)
+
+API_KEY = load_api_key()
 MOCK_MODE = os.environ.get("MINIMAX_MOCK_MODE", "false").lower() == "true"
 
-def solve_captcha(image_path, mock_result=None):
-    """
-    Send captcha image to MiniMax via understand_image tool.
-    Requires MiniMax Coding Plan MCP server to be running.
-    """
-    # Mock mode for testing
+def image_to_base64(image_path):
+    """Convert image to base64 data URL"""
+    with open(image_path, "rb") as f:
+        image_data = f.read()
+        base64_data = base64.b64encode(image_data).decode('utf-8')
+        ext = image_path.lower().split('.')[-1]
+        fmt = 'png' if ext == 'png' else 'jpeg'
+        return f"data:image/{fmt};base64,{base64_data}"
+
+def solve_captcha(image_path):
+    """Send captcha to MiniMax Vision (same method as OpenClaw)"""
     if MOCK_MODE:
-        if mock_result:
-            clean_text = re.sub(r'[^A-Z0-9]', '', mock_result.upper())[:4]
-        else:
-            import random
-            chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-            clean_text = ''.join(random.choice(chars) for _ in range(4))
-        return clean_text
+        import random
+        chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        return ''.join(random.choice(chars) for _ in range(4))
 
-    # Check if file exists
     if not os.path.exists(image_path):
-        return f"ERROR: File not found: {image_path}"
+        return "ERROR: File not found"
 
-    # Method 1: Use MiniMax Coding Plan MCP (if available)
     try:
-        result = subprocess.run(
-            ["npx", "-y", "minimax-coding-plan-mcp", "understand_image"],
-            input=json.dumps({
-                "prompt": "Extract ONLY the 4 characters you see. Reply with exactly 4 uppercase letters or numbers (A-Z, 0-9). Example: W5FE",
-                "image_url": f"file://{os.path.abspath(image_path)}"
-            }),
-            capture_output=True,
-            text=True,
+        image_url = image_to_base64(image_path)
+    except Exception as e:
+        return f"ERROR: {e}"
+
+    # OpenClaw's internal image tool uses the vision model endpoint
+    # Try the correct MiniMax Vision API format
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    # Method 1: VLM endpoint (MiniMax-VL-01)
+    payload = {
+        "model": "MiniMax-VL-01",
+        "prompt": "Extract ONLY the 4 characters you see. Reply with exactly 4 uppercase letters or numbers (A-Z, 0-9). Example: W5FE",
+        "image_url": image_url
+    }
+
+    try:
+        response = requests.post(
+            "https://api.minimax.io/v1/coding_plan/vlm",
+            headers=headers,
+            json=payload,
             timeout=30
         )
-        
-        if result.returncode == 0:
-            data = json.loads(result.stdout)
-            if "text" in data:
-                text = data["text"]
-                clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())[:4]
-                if clean_text:
-                    return clean_text
-    except Exception as mcp_error:
-        pass  # Fall through to next method
-    
-    # Method 2: Use OpenAI GPT-4o (alternative)
-    openai_key = os.environ.get("OPENAI_API_KEY", "")
-    if openai_key:
-        try:
-            import base64
-            from openai import OpenAI
-            
-            client = OpenAI(api_key=openai_key)
-            
-            with open(image_path, "rb") as f:
-                image_data = base64.b64encode(f.read()).decode('utf-8')
-            
-            response = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": "Extract ONLY the 4 characters you see in this image. Reply with exactly 4 uppercase letters or numbers (A-Z, 0-9). Example: W5FE"
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{image_data}"
-                                }
-                            }
-                        ]
-                    }
-                ],
-                max_tokens=10,
-                temperature=0.1
-            )
-            
-            text = response.choices[0].message.content.strip()
-            clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())[:4]
-            if clean_text:
-                return clean_text
-        except Exception as openai_error:
-            pass  # Fall through to next method
-    
-    # Method 3: Use Google Gemini (alternative)
-    gemini_key = os.environ.get("GOOGLE_API_KEY", "")
-    if gemini_key:
-        try:
-            import httpx
-            from PIL import Image
-            
-            img = Image.open(image_path)
-            
-            response = httpx.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}",
-                json={
-                    "contents": [{
-                        "parts": [
-                            {"text": "Extract ONLY the 4 characters you see. Reply with exactly 4 uppercase letters or numbers (A-Z, 0-9). Example: W5FE"},
-                            {"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(img.tobytes()).decode('utf-8')}}
-                        ]
-                    }],
-                    "generationConfig": {"maxOutputTokens": 10, "temperature": 0.1}
-                },
-                timeout=30
-            )
-            
-            data = response.json()
-            if "candidates" in data:
-                text = data["candidates"][0]["content"]["parts"][0]["text"]
-                clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())[:4]
-                if clean_text:
-                    return clean_text
-        except Exception as gemini_error:
-            pass
-    
-    # Method 4: Local OCR fallback (EasyOCR)
-    try:
-        import easyocr
-        reader = easyocr.Reader(['en'])
-        result = reader.readtext(image_path, detail=0)
-        if result:
-            text = ' '.join(result)
-            clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())[:4]
-            if clean_text:
-                return clean_text
-    except Exception:
-        pass
-    
-    return "ERROR: No vision provider available. Set MINIMAX_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY, or install EasyOCR."
+        response.raise_for_status()
+        data = response.json()
+
+        base_resp = data.get("base_resp") or {}
+        status_code = base_resp.get("status_code")
+        if status_code is not None and status_code != 0:
+            return f"API_ERROR: {base_resp.get('status_msg', status_code)}"
+
+        text = data.get("text", "").strip()
+        clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())[:4]
+        if clean_text:
+            return clean_text
+        return "PARSE_ERROR"
+
+    except Exception as e:
+        return f"API_ERROR: {e}"
 
 def main():
     """Read images from input directory, print results"""
     input_dir = "input"
     
-    # Check if input directory exists
     if not os.path.isdir(input_dir):
         print(f"Error: '{input_dir}' directory not found!")
-        print(f"Create '{input_dir}' folder and put images there")
         exit(1)
     
-    # Get sorted list of image files
-    files = sorted([f for f in os.listdir(input_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif'))])
+    files = sorted([f for f in os.listdir(input_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
     
     if not files:
-        print(f"No image files found in '{input_dir}'")
+        print(f"No .jpg/.jpeg/.png files found in '{input_dir}'")
         exit(0)
     
-    # Process each file
     for filename in files:
         path = os.path.join(input_dir, filename)
         result = solve_captcha(path)
