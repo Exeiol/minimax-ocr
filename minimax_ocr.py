@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 MiniMax Vision OCR - Simple Captcha Solver
-Uses MiniMax-VL-01 vision-language model
+Uses MiniMax-VL-01 vision-language model via Coding Plan API
 Reads images from 'input' directory, outputs: filename \t text
 """
 
@@ -12,7 +12,6 @@ import re
 
 # Configuration
 API_KEY = None
-API_URL = "https://api.minimax.io/v1/coding_plan/vlm"
 MOCK_MODE = os.environ.get("MINIMAX_MOCK_MODE", "false").lower() == "true"
 
 def load_api_key():
@@ -43,7 +42,7 @@ def image_to_data_url(image_path):
 def solve_captcha(image_path, mock_result=None):
     """
     Send captcha image to MiniMax Vision API and extract 4 characters (A-Z, 0-9).
-    Uses MiniMax-VL-01 model via /v1/coding_plan/vlm endpoint
+    Uses Anthropic API format for Coding Plan subscribers.
     """
     # Mock mode for testing
     if MOCK_MODE:
@@ -65,48 +64,91 @@ def solve_captcha(image_path, mock_result=None):
     except Exception as e:
         return f"ERROR: {e}"
 
-    # Prepare request (MiniMax-VL-01 format)
-    headers = {
+    # Method 1: Try Anthropic API format (for Coding Plan subscribers)
+    anthropic_url = "https://api.minimax.io/anthropic/v1/messages"
+    
+    anthropic_headers = {
         "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01"
     }
-
-    payload = {
+    
+    anthropic_payload = {
         "model": "MiniMax-VL-01",
-        "prompt": "Extract ONLY the 4 characters you see in this image. Reply with exactly 4 uppercase letters or numbers (A-Z, 0-9). No other text. Example: W5FE",
-        "image_url": image_url
+        "max_tokens": 10,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Extract ONLY the 4 characters you see in this image. Reply with exactly 4 uppercase letters or numbers (A-Z, 0-9). No other text. Example: W5FE"
+                    },
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": image_url.split(",")[1]
+                        }
+                    }
+                ]
+            }
+        ]
     }
 
-    # Make API call
+    # Try Anthropic format first (Coding Plan)
     try:
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
+        response = requests.post(anthropic_url, headers=anthropic_headers, json=anthropic_payload, timeout=30)
         response.raise_for_status()
-    except Exception as e:
-        return f"API_ERROR: {e}"
-
-    # Parse response
-    try:
         data = response.json()
-    except Exception:
-        return "PARSE_ERROR: invalid JSON"
-
-    # Check for MiniMax errors
-    base_resp = data.get("base_resp") or {}
-    status_code = base_resp.get("status_code")
-    if status_code is not None and status_code != 0:
-        return f"API_ERROR: {base_resp.get('status_msg', status_code)}"
-
-    # Extract text from response
-    text = data.get("text", "").strip()
-    if not text:
-        return "PARSE_ERROR: empty response"
-
-    # Clean: only A-Z, 0-9, exactly 4 chars
-    clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())[:4]
-    if not clean_text:
-        return "PARSE_ERROR: no valid characters"
-
-    return clean_text
+        
+        # Parse Anthropic response
+        if "content" in data and len(data["content"]) > 0:
+            for block in data["content"]:
+                if block.get("type") == "text":
+                    text = block.get("text", "").strip()
+                    clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())[:4]
+                    if clean_text:
+                        return clean_text
+        
+        return "PARSE_ERROR: no text in response"
+    except Exception as e:
+        error_str = str(e)
+        
+        # If Anthropic format fails, try VLM format
+        vlm_url = "https://api.minimax.io/v1/coding_plan/vlm"
+        
+        vlm_headers = {
+            "Authorization": f"Bearer {API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        vlm_payload = {
+            "model": "MiniMax-VL-01",
+            "prompt": "Extract ONLY the 4 characters you see in this image. Reply with exactly 4 uppercase letters or numbers (A-Z, 0-9). No other text. Example: W5FE",
+            "image_url": image_url
+        }
+        
+        try:
+            response = requests.post(vlm_url, headers=vlm_headers, json=vlm_payload, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+            
+            # Check for MiniMax errors
+            base_resp = data.get("base_resp") or {}
+            status_code = base_resp.get("status_code")
+            if status_code is not None and status_code != 0:
+                return f"API_ERROR: {base_resp.get('status_msg', status_code)}"
+            
+            # Extract text
+            text = data.get("text", "").strip()
+            clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())[:4]
+            if clean_text:
+                return clean_text
+            return "PARSE_ERROR: no valid characters"
+        except Exception as e2:
+            return f"API_ERROR: {str(e)}"
 
 def main():
     """Read images from input directory, print results"""
