@@ -13,17 +13,18 @@ pip install -r requirements.txt
 
 Create these files in the `minimax-ocr` directory:
 
-### 1. `api.key`
+### 1. `api.key` (REQUIRED)
 ```
 your_api_key_here
 ```
 
-### 2. `group_id.key`  
+Get it from: https://platform.minimax.io/
+
+### 2. `group_id.key` (OPTIONAL)
 ```
 your_group_id_here
 ```
-
-Get them from: https://platform.minimax.io/
+Only needed if your API requires it. Try without first.
 
 ## Input
 
