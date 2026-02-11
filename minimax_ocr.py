@@ -1,76 +1,76 @@
-import base64
-import requests
-import re
-import json
 import os
+import re
+import base64
+import mimetypes
+import requests
+
+ALLOWED_RE = re.compile(r"[^A-Z0-9]")
+CODE_RE = re.compile(r"^[A-Z0-9]{4}$")
+
+API_HOST = "https://api.minimax.io"
+API_URL = f"{API_HOST}/v1/coding_plan/vlm"
 
 
-def get_4_char_code(image_path, api_key):
-    """
-    Uses MiniMax-VL-01 to extract a 4-character alphanumeric code from an image.
-    """
-    # 1. Encode image to base64
-    with open(image_path, "rb") as image_file:
-        base64_image = base64.b64encode(image_file.read()).decode("utf-8")
+def to_data_url(image_path: str) -> str:
+    mime, _ = mimetypes.guess_type(image_path)
+    if mime not in ("image/png", "image/jpeg", "image/webp"):
+        mime = "image/jpeg"
+    with open(image_path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode("ascii")
+    return f"data:{mime};base64,{b64}"
 
-    # 2. Setup API details
-    # OpenClaw typically uses the v2 chat completion for MiniMax
-    url = "https://api.minimax.io/v1/text/chatcompletion_v2"
-    # url = "https://api.minimaxi.chat/v1/text/chatcompletion_v2"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
-    payload = {
-        "model": "MiniMax-M2.1",  # OpenClaw's preferred vision model
-        "messages": [
-            {
-                "role": "system",
-                "content": "You are a precise OCR agent. Locate the 4-character code in the image. "
-                "The code consists of uppercase letters and digits [A-Z, 0-9]. "
-                "Return ONLY the 4-character code and nothing else.",
-            },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "Find and extract the 4-character alphanumeric code from this image.",
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
-                    },
-                ],
-            },
-        ],
-        "temperature": 0.01,  # Low temperature for deterministic OCR
+def clean4(text: str) -> str:
+    return ALLOWED_RE.sub("", str(text).upper())[:4]
+
+
+def get_4_char_code(image_path: str, api_key: str) -> str:
+    prompt = (
+        "You are a precise OCR agent.\n"
+        "Read the captcha.\n"
+        "Return ONLY the 4-character code.\n"
+        "Allowed characters: A-Z and 0-9.\n"
+        "No extra text."
+    )
+
+    image_data_url = to_data_url(image_path)
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "MM-API-Source": "OpenClaw",
     }
 
-    try:
-        response = requests.post(url, headers=headers, json=payload)
-        response.raise_for_status()
-        data = response.json()
+    payload = {
+        "prompt": prompt,
+        "image_url": image_data_url,
+    }
 
-        # 3. Extract and sanitize result
-        # print(data)
-        json.dump(
-            data, open("debug_output.json", "w"), indent=4
-        )  # Save raw response for debugging
-        raw_text = data["choices"][0]["message"]["content"].strip()
+    r = requests.post(API_URL, headers=headers, json=payload, timeout=45)
+    if not r.ok:
+        return f"ERROR HTTP {r.status_code}: {r.text[:300]}"
 
-        # OpenClaw-style validation: Ensure it matches the 4-char alphanumeric pattern
-        match = re.search(r"[A-Z0-9]{4}", raw_text.upper())
-        if match:
-            return match.group(0)
-        return f"Code not found or invalid format. Raw output: {raw_text}"
+    j = r.json()
 
-    except Exception as e:
-        return f"Error: {str(e)}"
+    base_resp = j.get("base_resp") or {}
+    if base_resp.get("status_code") != 0:
+        return (
+            f"ERROR API {base_resp.get('status_code')}: {base_resp.get('status_msg')}"
+        )
+
+    raw = (j.get("content") or "").strip()
+    out = clean4(raw)
+
+    # strict validation: if it's not exactly 4 chars, expose raw output
+    if not CODE_RE.match(out):
+        return f"INVALID: {out} | raw={raw!r}"
+
+    return out
 
 
-# Example Usage:
 API_KEY = open("api.key").read().strip()
 
-for i in os.listdir("./input"):
-    if i.endswith(".jpg") or i.endswith(".png"):
-        print(f"Processing {i}: {get_4_char_code(os.path.join('./input', i), API_KEY)}")
-        # break
+for name in sorted(os.listdir("./input")):
+    if name.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+        path = os.path.join("./input", name)
+        print(f"{name} -> {get_4_char_code(path, API_KEY)}")
