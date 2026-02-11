@@ -6,7 +6,7 @@ from utils import to_data_url
 
 
 def load_api_key() -> str:
-    return os.getenv("MINIMAX_API_KEY") or Path("api.key").read_text().strip()
+    return Path("api.key").read_text().strip()
 
 
 def iter_images(folder: Path):
