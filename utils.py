@@ -3,7 +3,7 @@ import mimetypes
 from pathlib import Path
 
 
-def to_data_url(image_path: str) -> str:
+def get_b64_image(image_path: str) -> str:
     """
     Convert an image on disk to a data URL string.
     Keeps core logic free from file I/O so it can be reused elsewhere.
