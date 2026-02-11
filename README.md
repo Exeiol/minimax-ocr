@@ -9,59 +9,54 @@ cd ~/minimax-ocr/
 pip install -r requirements.txt
 ```
 
-## Configure API Key and Group ID
+## Configuration
 
-```bash
-export MINIMAX_API_KEY='your_api_key'
-export MINIMAX_GROUP_ID='your_group_id'
+Create these files in the `minimax-ocr` directory:
+
+### 1. `api.key`
+```
+your_api_key_here
 ```
 
-Get your key and group ID from: https://platform.minimax.io/
+### 2. `group_id.key`  
+```
+your_group_id_here
+```
+
+Get them from: https://platform.minimax.io/
+
+## Input
+
+Put your images in the `input/` directory:
+- Supported formats: `.jpg`, `.jpeg`, `.png`
+- Files are processed in alphabetical order
 
 ## Usage
 
 ```bash
-# Single image
-python minimax_ocr.py captcha.gif
+# Real API mode
+python3 minimax_ocr.py
 
-# Multiple images
-python minimax_ocr.py test_images/*.gif
-
-# All images
-python minimax_ocr.py *.gif
-```
-
-## Testing Without API Key (Mock Mode)
-
-Test the code without an API key using mock mode:
-
-```bash
+# Mock mode (testing without API)
 export MINIMAX_MOCK_MODE='true'
-python minimax_ocr.py test_images/*.gif
+python3 minimax_ocr.py
 ```
 
-Mock mode generates random 4-character results for testing.
-
-## How It Works
-
-1. Encodes image as base64
-2. Sends to MiniMax-M2.1 API (vision/multimodal)
-3. Extracts 4-character captcha (A-Z, 0-9)
-4. Returns clean uppercase text
-
-## Output Example
+## Output Format
 
 ```
-Processing: test_images/captcha.gif
-  ✅ Result: W5FE
+filename.ext	 extracted_text
+```
 
-📊 Results: 1/1 successful
+Example:
+```
+captcha001.png	W5FE
+captcha002.png	4RKG
 ```
 
 ## Notes
 
-- Requires MiniMax API key with vision/multimodal access
-- Temperature set to 0.1 for consistent results
-- Only accepts A-Z and 0-9 characters
-- Returns 4 characters maximum
-- Use `MINIMAX_MOCK_MODE=true` for testing without API
+- Only extracts A-Z and 0-9 characters
+- Returns exactly 4 characters maximum
+- Temperature 0.1 for consistent results
+- MiniMax-M2 model with vision/multimodal capabilities
