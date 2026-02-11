@@ -13,7 +13,7 @@ pip install -r requirements.txt
 
 Create these files in the `minimax-ocr` directory:
 
-### 1. `api.key` (REQUIRED)
+### 1. `api.key` (REQUIRED unless `MINIMAX_API_KEY` env var is set)
 ```
 your_api_key_here
 ```
@@ -35,11 +35,6 @@ Put your images in the `input/` directory:
 ## Usage
 
 ```bash
-# Real API mode
-python3 minimax_ocr.py
-
-# Mock mode (testing without API)
-export MINIMAX_MOCK_MODE='true'
 python3 minimax_ocr.py
 ```
 
@@ -57,7 +52,6 @@ captcha002.png	4RKG
 
 ## Notes
 
-- Only extracts A-Z and 0-9 characters
-- Returns exactly 4 characters maximum
-- Temperature 0.1 for consistent results
-- MiniMax-M2 model with vision/multimodal capabilities
+- Core request logic lives in `core.py` (`MiniMaxOCR.get_4_char_code`)
+- File I/O is isolated in `utils.py` so services can inject their own image data
+- Only extracts A-Z and 0-9 characters; returns exactly 4 characters maximum
