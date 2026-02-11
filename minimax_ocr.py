@@ -13,17 +13,35 @@ import sys
 # Configuration
 MINIMAX_API_KEY = os.environ.get("MINIMAX_API_KEY", "YOUR_API_KEY_HERE")
 API_URL = "https://api.minimax.chat/v1/text/chatcompletion_v2"
+MOCK_MODE = os.environ.get("MINIMAX_MOCK_MODE", "false").lower() == "true"
 
 def encode_image(image_path):
     """Encode image to base64"""
     with open(image_path, "rb") as f:
         return base64.b64encode(f.read()).decode('utf-8')
 
-def solve_captcha(image_path):
+def solve_captcha(image_path, mock_result=None):
     """
     Send captcha image to MiniMax API and extract text.
     Expected: 4 characters, A-Z and 0-9 only.
     """
+    # Mock mode for testing without API key
+    if MOCK_MODE:
+        import re
+        import random
+        if mock_result:
+            clean_text = re.sub(r'[^A-Z0-9]', '', mock_result.upper())[:4]
+        else:
+            # Generate random 4-char result
+            chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+            clean_text = ''.join(random.choice(chars) for _ in range(4))
+        return {
+            "image": image_path,
+            "result": clean_text,
+            "raw_response": f"[MOCK] {clean_text}",
+            "success": True,
+            "mock": True
+        }
     # Encode image
     try:
         base64_image = encode_image(image_path)
@@ -106,6 +124,7 @@ if __name__ == "__main__":
         print("Usage: python minimax_ocr.py <image_path>")
         print("       python minimax_ocr.py *.gif")
         print("\nSet API key: export MINIMAX_API_KEY='your_key'")
+        print("Or use mock mode: export MINIMAX_MOCK_MODE='true'")
         sys.exit(1)
 
     # Get image paths
@@ -115,10 +134,11 @@ if __name__ == "__main__":
     else:
         image_paths = sys.argv[1:]
 
-    # Check API key
-    if MINIMAX_API_KEY == "YOUR_API_KEY_HERE":
+    # Check API key (skip if mock mode)
+    if not MOCK_MODE and MINIMAX_API_KEY == "YOUR_API_KEY_HERE":
         print("⚠️  Set MINIMAX_API_KEY environment variable first!")
         print("   export MINIMAX_API_KEY='your_api_key'")
+        print("   Or test with mock mode: export MINIMAX_MOCK_MODE='true'")
         sys.exit(1)
 
     # Solve
@@ -126,4 +146,5 @@ if __name__ == "__main__":
 
     # Summary
     successful = sum(1 for r in results if r.get("success"))
-    print(f"\n📊 Results: {successful}/{len(results)} successful")
+    mode = "[MOCK MODE] " if MOCK_MODE else ""
+    print(f"\n{mode}📊 Results: {successful}/{len(results)} successful")
