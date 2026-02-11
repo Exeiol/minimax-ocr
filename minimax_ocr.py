@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 MiniMax Vision OCR - Simple Captcha Solver
+Uses MiniMax-VL-01 vision-language model
 Reads images from 'input' directory, outputs: filename \t text
 """
 
@@ -10,37 +11,39 @@ import requests
 import re
 
 # Configuration
+API_KEY = None
+API_URL = "https://api.minimax.io/v1/coding_plan/vlm"
+MOCK_MODE = os.environ.get("MINIMAX_MOCK_MODE", "false").lower() == "true"
+
 def load_api_key():
     """Read API key from api.key file"""
+    global API_KEY
     try:
         with open("api.key", "r") as f:
-            return f.read().strip()
+            API_KEY = f.read().strip()
     except FileNotFoundError:
         print("Error: api.key file not found!")
         print("Create 'api.key' file with your MiniMax API key")
         exit(1)
 
-def load_group_id():
-    """Read Group ID from group_id.key file (optional)"""
-    try:
-        with open("group_id.key", "r") as f:
-            return f.read().strip()
-    except FileNotFoundError:
-        return None  # Group ID is optional
-
-API_KEY = load_api_key()
-GROUP_ID = load_group_id()
-API_URL = "https://api.minimax.io/v1/text/chatcompletion_v2"
-MOCK_MODE = os.environ.get("MINIMAX_MOCK_MODE", "false").lower() == "true"
-
-def encode_image(image_path):
-    """Encode image to base64"""
+def image_to_data_url(image_path):
+    """Convert image to base64 data URL"""
     with open(image_path, "rb") as f:
-        return base64.b64encode(f.read()).decode('utf-8')
+        image_data = f.read()
+        base64_data = base64.b64encode(image_data).decode('utf-8')
+        # Detect format from file extension
+        if image_path.lower().endswith('.png'):
+            format = 'png'
+        elif image_path.lower().endswith('.webp'):
+            format = 'webp'
+        else:
+            format = 'jpeg'
+        return f"data:image/{format};base64,{base64_data}"
 
 def solve_captcha(image_path, mock_result=None):
     """
-    Send captcha image to MiniMax API and extract 4 characters (A-Z, 0-9).
+    Send captcha image to MiniMax Vision API and extract 4 characters (A-Z, 0-9).
+    Uses MiniMax-VL-01 model via /v1/coding_plan/vlm endpoint
     """
     # Mock mode for testing
     if MOCK_MODE:
@@ -52,48 +55,31 @@ def solve_captcha(image_path, mock_result=None):
             clean_text = ''.join(random.choice(chars) for _ in range(4))
         return clean_text
 
+    # Read API key
+    if API_KEY is None:
+        load_api_key()
+
     # Encode image
     try:
-        base64_image = encode_image(image_path)
+        image_url = image_to_data_url(image_path)
     except Exception as e:
         return f"ERROR: {e}"
 
-    # Prepare request
+    # Prepare request (MiniMax-VL-01 format)
     headers = {
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json"
     }
 
-    url = f"{API_URL}"
-    if GROUP_ID:
-        url += f"?GroupId={GROUP_ID}"
-
     payload = {
-        "model": "MiniMax-M2",
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "Extract ONLY the 4 characters you see. Reply with exactly 4 uppercase letters or numbers (A-Z, 0-9). No other text. Example: W5FE"
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/png;base64,{base64_image}"
-                        }
-                    }
-                ]
-            }
-        ],
-        "temperature": 0.1,
-        "max_tokens": 10
+        "model": "MiniMax-VL-01",
+        "prompt": "Extract ONLY the 4 characters you see in this image. Reply with exactly 4 uppercase letters or numbers (A-Z, 0-9). No other text. Example: W5FE",
+        "image_url": image_url
     }
 
     # Make API call
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
     except Exception as e:
         return f"API_ERROR: {e}"
@@ -101,15 +87,26 @@ def solve_captcha(image_path, mock_result=None):
     # Parse response
     try:
         data = response.json()
-        if "choices" in data and len(data["choices"]) > 0:
-            text = data["choices"][0]["message"]["content"].strip()
-            # Extract only A-Z and 0-9, uppercase, exactly 4 chars
-            clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())[:4]
-            return clean_text
-        else:
-            return f"PARSE_ERROR"
     except Exception:
-        return "PARSE_ERROR"
+        return "PARSE_ERROR: invalid JSON"
+
+    # Check for MiniMax errors
+    base_resp = data.get("base_resp") or {}
+    status_code = base_resp.get("status_code")
+    if status_code is not None and status_code != 0:
+        return f"API_ERROR: {base_resp.get('status_msg', status_code)}"
+
+    # Extract text from response
+    text = data.get("text", "").strip()
+    if not text:
+        return "PARSE_ERROR: empty response"
+
+    # Clean: only A-Z, 0-9, exactly 4 chars
+    clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())[:4]
+    if not clean_text:
+        return "PARSE_ERROR: no valid characters"
+
+    return clean_text
 
 def main():
     """Read images from input directory, print results"""
@@ -122,10 +119,10 @@ def main():
         exit(1)
     
     # Get sorted list of image files
-    files = sorted([f for f in os.listdir(input_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
+    files = sorted([f for f in os.listdir(input_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))])
     
     if not files:
-        print(f"No .jpg/.jpeg/.png files found in '{input_dir}'")
+        print(f"No .jpg/.jpeg/.png/.webp files found in '{input_dir}'")
         exit(0)
     
     # Process each file
