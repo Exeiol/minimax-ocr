@@ -30,7 +30,7 @@ def main() -> None:
     additional_prompt = ""
     deny_list = ["4QXI"]
     if deny_list:
-        additional_prompt += f"Deny List: {deny_list}"
+        additional_prompt += f"Already Denied: {deny_list}"
     code = ocr.get_4_char_code(data_url, additional_prompt=additional_prompt)
     print(f"{input_dir}\t{code}")
 
